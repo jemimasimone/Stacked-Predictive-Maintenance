@@ -1,0 +1,28 @@
+artifact_path: models/XGB
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.8.20
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.3.2
+mlflow_version: 2.17.2
+model_size_bytes: 1772173
+model_uuid: 01f5923e3d43433b8f0d2002daf16c79
+run_id: blue_watch_8bf8rm46j9
+signature:
+  inputs: '[{"type": "long", "name": "Machine type", "required": true}, {"type": "double",
+    "name": "Air temperature", "required": true}, {"type": "double", "name": "Process
+    temperature", "required": true}, {"type": "double", "name": "Rotational speed",
+    "required": true}, {"type": "double", "name": "Torque", "required": true}, {"type":
+    "double", "name": "Tool wear", "required": true}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "int64", "shape": [-1]}}]'
+  params: null
+utc_time_created: '2025-05-26 14:08:56.151560'

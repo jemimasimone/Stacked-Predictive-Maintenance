@@ -1,0 +1,1603 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# Predictive Maintenance"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Connect to Workspace"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential\n",
+        "from azure.ai.ml import MLClient\n",
+        "\n",
+        "try:\n",
+        "    credential = DefaultAzureCredential()\n",
+        "    credential.get_token(\"https://management.azure.com/.default\")\n",
+        "except Exception as ex:\n",
+        "    credential = InteractiveBrowserCredential()\n",
+        "\n",
+        "ml_client = MLClient.from_config(credential=credential)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "Found the config file in: /config.json\n"
+        }
+      ],
+      "execution_count": 6,
+      "metadata": {
+        "gather": {
+          "logged": 1747675907597
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Environment Setup"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Create environment directory."
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "\n",
+        "dependencies_folder = 'env'\n",
+        "os.makedirs(dependencies_folder, exist_ok=True)\n",
+        "print(dependencies_folder, 'folder created')"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "env folder created\n"
+        }
+      ],
+      "execution_count": 1,
+      "metadata": {
+        "gather": {
+          "logged": 1747405431554
+        },
+        "jupyter": {
+          "source_hidden": true
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile {dependencies_folder}/conda.yaml\n",
+        "name: sklearn-env\n",
+        "channels:\n",
+        "  - conda-forge\n",
+        "dependencies:\n",
+        "  - python=3.8\n",
+        "  - pip\n",
+        "  - scikit-learn\n",
+        "  - scipy\n",
+        "  - imbalanced-learn\n",
+        "  - numpy=1.24.3\n",
+        "  - xgboost\n",
+        "  - pandas\n",
+        "  - seaborn\n",
+        "  - matplotlib\n",
+        "  - pip:  \n",
+        "    - azureml-mlflow\n",
+        "    - mlflow-skinny\n",
+        "    - azure-ai-ml\n"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Overwriting env/conda.yaml\n"
+        }
+      ],
+      "execution_count": 3,
+      "metadata": {
+        "jupyter": {
+          "source_hidden": true
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Register environment in workspace."
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azure.ai.ml.entities import Environment\n",
+        "\n",
+        "custom_env_name = \"sklearn-env\"\n",
+        "\n",
+        "pdm_env = Environment(\n",
+        "    image=\"mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04\",\n",
+        "    conda_file=os.path.join(dependencies_folder, \"conda.yaml\"),\n",
+        "    name=custom_env_name,\n",
+        "    description=\"Environment for Predictive Maintenance with XGBoost\",\n",
+        ")\n",
+        "job_env = ml_client.environments.create_or_update(pdm_env)\n",
+        "\n",
+        "print(\n",
+        "    f\"Environment with name {job_env.name} is registered to workspace, the environment version is {job_env.version}\"\n",
+        ")"
+      ],
+      "outputs": [],
+      "execution_count": null,
+      "metadata": {
+        "gather": {
+          "logged": 1747191748240
+        },
+        "jupyter": {
+          "source_hidden": true
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Data Processing"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Register raw data in workspace."
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azure.ai.ml.entities import Data\n",
+        "from azure.ai.ml.constants import AssetTypes\n",
+        "\n",
+        "my_data = Data(\n",
+        "    path=\"./data/ai4i2020-predictive-maintenance.csv\",\n",
+        "    type=AssetTypes.URI_FILE,\n",
+        "    name=\"predictive_maintenance_raw_data\",\n",
+        "    description=\"AI4I 2020 Predictive maintenance dataset\"\n",
+        ")\n",
+        "ml_client.data.create_or_update(my_data)\n"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "\r\u001b[32mUploading ai4i2020-predictive-maintenance.csv\u001b[32m (< 1 MB): 0.00B [00:00, ?B/s]\r\u001b[32mUploading ai4i2020-predictive-maintenance.csv\u001b[32m (< 1 MB): 100%|██████████| 522k/522k [00:00<00:00, 12.6MB/s]\n\u001b[39m\n\n"
+        },
+        {
+          "output_type": "execute_result",
+          "execution_count": 6,
+          "data": {
+            "text/plain": "Data({'path': 'azureml://subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourcegroups/case-study-rg/workspaces/ml-intern-ws/datastores/workspaceblobstore/paths/LocalUpload/ced9beaca6dde675927114399c8cc851/ai4i2020-predictive-maintenance.csv', 'skip_validation': False, 'mltable_schema_url': None, 'referenced_uris': None, 'type': 'uri_file', 'is_anonymous': False, 'auto_increment_version': False, 'auto_delete_setting': None, 'name': 'predictive_maintenance_raw_data', 'description': 'AI4I 2020 Predictive maintenance dataset', 'tags': {}, 'properties': {}, 'print_as_yaml': False, 'id': '/subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourceGroups/case-study-rg/providers/Microsoft.MachineLearningServices/workspaces/ml-intern-ws/data/predictive_maintenance_raw_data/versions/1', 'Resource__source_path': '', 'base_path': '/mnt/batch/tasks/shared/LS_root/mounts/clusters/jmanuel/code/Users/jemima.simone.manuel/predictive-maintenance', 'creation_context': <azure.ai.ml.entities._system_data.SystemData object at 0x7605640c0c40>, 'serialize': <msrest.serialization.Serializer object at 0x7605640cf4c0>, 'version': '1', 'latest_version': None, 'datastore': None})"
+          },
+          "metadata": {}
+        }
+      ],
+      "execution_count": 6,
+      "metadata": {
+        "gather": {
+          "logged": 1747192577049
+        },
+        "jupyter": {
+          "outputs_hidden": true,
+          "source_hidden": true
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Creating script directory."
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "\n",
+        "script_folder = 'src'\n",
+        "os.makedirs(script_folder, exist_ok=True)\n",
+        "print(script_folder, 'folder created')"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "src folder created\n"
+        }
+      ],
+      "execution_count": 1,
+      "metadata": {
+        "gather": {
+          "logged": 1747674573275
+        },
+        "jupyter": {
+          "source_hidden": false
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Create script for preparing data."
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile {script_folder}/prep-data.py\n",
+        "\n",
+        "import argparse\n",
+        "import pandas as pd\n",
+        "from sklearn.preprocessing import StandardScaler\n",
+        "from imblearn.over_sampling import SMOTENC\n",
+        "from azure.ai.ml import MLClient\n",
+        "from azure.identity import DefaultAzureCredential\n",
+        "import os\n",
+        "import joblib\n",
+        "\n",
+        "def main(args):\n",
+        "    input_path = args.input_data\n",
+        "    output_dir = args.output_data\n",
+        "    num_cols = ['Rotational speed', 'Tool wear']\n",
+        "    float_cols = ['Air temperature', 'Process temperature', 'Rotational speed', 'Torque', 'Tool wear']\n",
+        "    threshold_unique = 90\n",
+        "    infrequent_threshold = 0.05\n",
+        "\n",
+        "    print(f\"Reading data from: {input_path}\")\n",
+        "    df = read_data(input_path)\n",
+        "    print(f\"Initial data shape: {df.shape}\")\n",
+        "\n",
+        "    print(\"Cleaning data...\")\n",
+        "    cleaned_df = clean_data(df)\n",
+        "    print(f\"Cleaned data shape: {cleaned_df.shape}\")\n",
+        "\n",
+        "    print(\"Renaming features...\")\n",
+        "    renamed_df = rename_features(cleaned_df)\n",
+        "    print(f\"Shape after renaming: {renamed_df.shape}\")\n",
+        "\n",
+        "    print(\"Converting numerical columns to float...\")\n",
+        "    normalized_df = num_to_float(renamed_df, num_cols)\n",
+        "    print(f\"Shape after float conversion: {normalized_df.shape}\")\n",
+        "\n",
+        "    print(f\"Dropping columns with more than {threshold_unique}% unique values...\")\n",
+        "    dropped_df = drop_high_unique_cols(normalized_df, threshold=threshold_unique)\n",
+        "    print(f\"Shape after dropping high unique columns: {dropped_df.shape}\")\n",
+        "\n",
+        "    print(\"Creating 'Failure type' column...\")\n",
+        "    add_col_df = create_failure_type(dropped_df)\n",
+        "    print(f\"Shape after creating 'Failure type': {add_col_df.shape}\")\n",
+        "\n",
+        "    print(\"Encoding categorical features...\")\n",
+        "    encoded_df = label_enc(add_col_df)\n",
+        "    print(f\"Shape after encoding: {encoded_df.shape}\")\n",
+        "\n",
+        "    print(\"Scaling numerical features...\")\n",
+        "    scaled_df, scaler = scaling_data(encoded_df, float_cols)\n",
+        "    print(f\"Shape after scaling: {scaled_df.shape}\")\n",
+        "    print(f\"Saving scaler to: {args.scaler_output}\")\n",
+        "    joblib.dump(scaler, args.scaler_output)\n",
+        "\n",
+        "    print(\"Removing target anomalies...\")\n",
+        "    removed_anom = target_anomaly(scaled_df)\n",
+        "    print(f\"Shape after removing target anomalies: {removed_anom.shape}\")\n",
+        "\n",
+        "    print(f\"Dropping infrequent 'Failure type' (<= {infrequent_threshold*100}%)...\")\n",
+        "    cleaned_failure = drop_infrequent(removed_anom, threshold=infrequent_threshold)\n",
+        "    print(f\"Shape after dropping infrequent failures: {cleaned_failure.shape}\")\n",
+        "\n",
+        "    print(\"Augmenting data using SMOTENC...\")\n",
+        "    augmented_data = augment_data(cleaned_failure)\n",
+        "    print(f\"Shape after augmentation: {augmented_data.shape}\")\n",
+        "\n",
+        "    parent_dir = os.path.dirname(output_dir)\n",
+        "    if parent_dir:\n",
+        "        os.makedirs(parent_dir, exist_ok=True)\n",
+        "        print(f\"Parent output directory ensured: {parent_dir}\")\n",
+        "    else:\n",
+        "        print(f\"Warning: Output path '{output_dir}' has no parent directory. Writing to current directory.\")\n",
+        "    print(f\"Writing prepared data to: {output_dir}\")\n",
+        "    augmented_data.to_csv(output_dir, index=False)\n",
+        "    \n",
+        "    row_count = (len(augmented_data))\n",
+        "    print(f'Prepared {row_count} rows of data')\n",
+        "    print(augmented_data.info())\n",
+        "\n",
+        "def read_data(path):\n",
+        "    df = pd.read_csv(path)\n",
+        "    return df\n",
+        "\n",
+        "def clean_data(df):\n",
+        "    df = df.dropna()\n",
+        "    df = df.drop_duplicates()\n",
+        "    return df\n",
+        "\n",
+        "def rename_features(df):\n",
+        "    df.rename(mapper={'Type': 'Machine type', 'Air temperature [K]': 'Air temperature',\n",
+        "                      'Process temperature [K]': 'Process temperature',\n",
+        "                      'Rotational speed [rpm]': 'Rotational speed',\n",
+        "                      'Torque [Nm]': 'Torque',\n",
+        "                      'Tool wear [min]': 'Tool wear'}, axis=1, inplace=True)\n",
+        "    return df\n",
+        "\n",
+        "def num_to_float(df, num_cols):\n",
+        "    df[num_cols] = df[num_cols].astype(float)\n",
+        "    return df\n",
+        "\n",
+        "def drop_high_unique_cols(df, threshold):\n",
+        "    init_cols = df.columns.tolist()\n",
+        "    num_rows = len(df)\n",
+        "    drop_cols = []\n",
+        "    for col in df.columns:\n",
+        "        unique_count = df[col].nunique()\n",
+        "        unique_percentage = unique_count / num_rows * 100\n",
+        "        if unique_percentage > threshold:\n",
+        "            drop_cols.append(col)\n",
+        "    df = df.drop(columns=drop_cols)\n",
+        "    return df\n",
+        "\n",
+        "def create_failure_type(df):\n",
+        "    df['Failure type'] = 'No Failure'\n",
+        "    df.loc[df['TWF'] == 1, 'Failure type'] = 'TWF'\n",
+        "    df.loc[df['HDF'] == 1, 'Failure type'] = 'HDF'\n",
+        "    df.loc[df['PWF'] == 1, 'Failure type'] = 'PWF'\n",
+        "    df.loc[df['OSF'] == 1, 'Failure type'] = 'OSF'\n",
+        "    df.loc[df['RNF'] == 1, 'Failure type'] = 'RNF'\n",
+        "    failure_columns = ['TWF', 'HDF', 'PWF', 'OSF', 'RNF']\n",
+        "    for index, row in df.iterrows():\n",
+        "        if row['Failure type'] == 'No Failure' and row['Machine failure'] == 1:\n",
+        "            for col in failure_columns:\n",
+        "                if row[col] == 1:\n",
+        "                    df.loc[index, 'Failure type'] = col\n",
+        "                    break\n",
+        "    df = df.drop(columns=['TWF', 'HDF', 'PWF', 'OSF', 'RNF'])\n",
+        "    return df\n",
+        "\n",
+        "def label_enc(df):\n",
+        "    machine_type_dict = {'L': 0, 'M': 1, 'H': 2}\n",
+        "    machine_failure_dict = {'No Failure': 0, 'PWF': 1, 'OSF': 2, 'HDF': 3, 'TWF': 4, 'RNF': 5}\n",
+        "    df['Machine type'].replace(to_replace=machine_type_dict, inplace=True)\n",
+        "    df['Failure type'].replace(to_replace=machine_failure_dict, inplace=True)\n",
+        "    return df\n",
+        "\n",
+        "def scaling_data(df, float_cols):\n",
+        "    sc = StandardScaler()\n",
+        "    df[float_cols] = sc.fit_transform(df[float_cols])\n",
+        "    return df, sc\n",
+        "\n",
+        "def target_anomaly(df):\n",
+        "    anomaly1 = ((df[\"Machine failure\"] == 0) & (df[\"Failure type\"] == 5))\n",
+        "    df.drop(index=df.loc[anomaly1].index, inplace=True)\n",
+        "    anomaly2 = ((df[\"Machine failure\"] == 1) & (df[\"Failure type\"] == 0))\n",
+        "    df.drop(index=df.loc[anomaly2].index, inplace=True)\n",
+        "    df.reset_index(drop=True, inplace=True)\n",
+        "    return df\n",
+        "\n",
+        "def drop_infrequent(df, threshold):\n",
+        "    num_rows = len(df)\n",
+        "    value_counts = df['Failure type'].value_counts(normalize=True) * 100\n",
+        "    infrequent_values = value_counts[value_counts <= threshold].index.tolist()\n",
+        "    df = df[~df['Failure type'].isin(infrequent_values)].copy()\n",
+        "    df.reset_index(drop=True, inplace=True)\n",
+        "    return df\n",
+        "\n",
+        "def augment_data(df):\n",
+        "    working = df['Failure type'].value_counts()[0]\n",
+        "    desired_length = round(working / 0.8)\n",
+        "    spc = round((desired_length - working) / 4)\n",
+        "    balance_cause = {0: working, 1: spc, 2: spc, 3: spc, 4: spc}\n",
+        "    aug = SMOTENC(categorical_features=[0, 7], sampling_strategy=balance_cause, random_state=0)\n",
+        "    df, _= aug.fit_resample(df, df['Failure type'])\n",
+        "    return df\n",
+        "\n",
+        "def parse_args():\n",
+        "    parser = argparse.ArgumentParser()\n",
+        "    parser.add_argument(\"--input_data\", dest='input_data', type=str, required=True,\n",
+        "                        help=\"Path to the input data (can be a local path or Azure ML URI)\")\n",
+        "    parser.add_argument(\"--output_data\", dest='output_data', type=str, required=True,\n",
+        "                        help=\"Path to the output directory\")\n",
+        "    parser.add_argument(\"--scaler_output\", dest='scaler_output', type=str, required=True,\n",
+        "                    help=\"Path to save the fitted scaler\")\n",
+        "    return parser.parse_args()\n",
+        "\n",
+        "if __name__ == \"__main__\":\n",
+        "    args = parse_args()\n",
+        "    main(args)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Overwriting src/prep-data.py\n"
+        }
+      ],
+      "execution_count": 42,
+      "metadata": {
+        "jupyter": {
+          "source_hidden": true
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Create command job to run the prep-data script and register the output as URI File."
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azure.ai.ml import Input, Output\n",
+        "from azure.ai.ml.constants import AssetTypes\n",
+        "from azure.ai.ml import command\n",
+        "\n",
+        "prep_data = command(\n",
+        "    code=\"./src\",\n",
+        "    command=\"python prep-data.py --input_data ${{inputs.raw_data}} --output_data ${{outputs.processed_data}} --scaler_output ${{outputs.scaler_output}}\",\n",
+        "    inputs={\n",
+        "        \"raw_data\": Input(type=\"uri_file\", path=\"azureml:predictive_maintenance_raw_data:1\")\n",
+        "    },\n",
+        "    outputs={\"processed_data\": Output(\n",
+        "        type=AssetTypes.URI_FILE,\n",
+        "        mode=\"rw_mount\",\n",
+        "        name=\"training_data_predictive_maintenance\",\n",
+        "        description=\"Training data for predictive maintenance\"),\n",
+        "        \"scaler_output\": Output(\n",
+        "            type=AssetTypes.URI_FILE,\n",
+        "            mode=\"rw_mount\",\n",
+        "            name=\"scaler_predictive_maintenance\",\n",
+        "            description=\"Fitted StandardScaler for predictive maintenance\")\n",
+        "    },\n",
+        "    environment=\"sklearn-env:2\",\n",
+        "    compute=\"jmanuel\",\n",
+        "    display_name=\"prep-data-script\",\n",
+        "    experiment_name=\"prep-data\",\n",
+        "    )\n",
+        "\n",
+        "returned_job = ml_client.create_or_update(prep_data)\n",
+        "aml_url = returned_job.studio_url\n",
+        "print(\"Monitor your job at\", aml_url)\n"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "\u001b[32mUploading src (0.03 MBs): 100%|██████████| 29443/29443 [00:00<00:00, 835145.01it/s]\n\u001b[39m\n\npathOnCompute is not a known attribute of class <class 'azure.ai.ml._restclient.v2023_04_01_preview.models._models_py3.UriFileJobOutput'> and will be ignored\npathOnCompute is not a known attribute of class <class 'azure.ai.ml._restclient.v2023_04_01_preview.models._models_py3.UriFileJobOutput'> and will be ignored\n"
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Monitor your job at https://ml.azure.com/runs/plum_pin_z447wntv8y?wsid=/subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourcegroups/case-study-rg/workspaces/ml-intern-ws&tid=6f731b06-089d-46f3-b7a6-b11ab2f47e4c\n"
+        }
+      ],
+      "execution_count": 9,
+      "metadata": {
+        "gather": {
+          "logged": 1747318582616
+        },
+        "jupyter": {
+          "source_hidden": true,
+          "outputs_hidden": true
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Model Training - Binary Classifier"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile {script_folder}/train-binary-model.py\n",
+        "\n",
+        "import pandas as pd\n",
+        "from sklearn.model_selection import train_test_split\n",
+        "import xgboost as xgb\n",
+        "from sklearn.metrics import confusion_matrix, accuracy_score, roc_auc_score, f1_score, fbeta_score, make_scorer\n",
+        "import matplotlib.pyplot as plt\n",
+        "import seaborn as sns\n",
+        "from sklearn.model_selection import GridSearchCV\n",
+        "import time\n",
+        "import argparse\n",
+        "import os\n",
+        "import joblib\n",
+        "import mlflow\n",
+        "import mlflow.sklearn\n",
+        "from mlflow.models.signature import infer_signature\n",
+        "from mlflow.tracking import MlflowClient\n",
+        "\n",
+        "def main(args):\n",
+        "    prepared_data = args.prepared_data\n",
+        "    scaler_path = args.scaler_path\n",
+        "    scaler = joblib.load(scaler_path)\n",
+        "    print(\"Scaler loaded successfully.\")\n",
+        "\n",
+        "    with mlflow.start_run():\n",
+        "        client = MlflowClient()\n",
+        "        run_id = mlflow.active_run().info.run_id\n",
+        "\n",
+        "        mlflow.log_artifact(scaler_path, artifact_path=\"scaler\")\n",
+        "\n",
+        "        df = read_data(prepared_data)\n",
+        "        print(\"Data loaded successfully:\")\n",
+        "        print(df.info())\n",
+        "\n",
+        "        print(\"Splitting data...\")\n",
+        "        X_train, y_train, X_val, y_val, X_test, y_test = split_data(df)\n",
+        "\n",
+        "        print(\"Binary task...\")\n",
+        "        xgb1_binary = xgb.XGBClassifier(eval_metric='logloss', random_state=42)\n",
+        "        xgb2_binary = xgb.XGBClassifier(eval_metric='logloss', n_estimators=200, max_depth=5, learning_rate=0.1, random_state=42)\n",
+        "        xgb3_binary = xgb.XGBClassifier(eval_metric='logloss', n_estimators=50, max_depth=7, random_state=42)\n",
+        "        clf_binary = [xgb1_binary, xgb2_binary, xgb3_binary]\n",
+        "        clf_str_binary = ['XGB1', 'XGB2', 'XGB3']\n",
+        "\n",
+        "        xgb1_params_binary = {\"n_estimators\": [50, 100], \"max_depth\": [3, 4]}\n",
+        "        xgb2_params_binary = {\"n_estimators\": [150, 175, 200], \"max_depth\": [4, 5], \"learning_rate\": [0.1, 0.03, 0.05]}\n",
+        "        xgb3_params_binary = {\"n_estimators\": [30, 40, 50], \"max_depth\": [6, 7]}\n",
+        "        params_binary = pd.Series(data=[xgb1_params_binary, xgb2_params_binary, xgb3_params_binary], index=clf_binary)\n",
+        "\n",
+        "        metrics_df, fitted_models, confusion_matrices = fit_base_models(clf_binary, clf_str_binary, X_train, X_val, y_train, y_val)\n",
+        "        plot_model_metrics(metrics_df, \"base_model_metrics.png\")\n",
+        "        mlflow.log_artifact(\"binary_base_model_metrics.png\")\n",
+        "\n",
+        "        for name, cm in confusion_matrices.items():\n",
+        "            plot_confusion_matrix(cm, ['No Failure', 'Failure'], f'confusion_matrix_{name}.png')\n",
+        "            mlflow.log_artifact(f'confusion_matrix_binary_{name}.png')\n",
+        "\n",
+        "        fitted_models_binary = {name: tune_and_fit(model, X_train, y_train, params_binary[model]) for model, name in zip(clf_binary, clf_str_binary)}\n",
+        "        for name, model in fitted_models_binary.items():\n",
+        "            input_example = pd.DataFrame(X_test)\n",
+        "            signature = infer_signature(input_example, model.predict(X_test))\n",
+        "            mlflow.sklearn.log_model(model, artifact_path=f\"models/{name}\", signature=signature)\n",
+        "\n",
+        "        for name in fitted_models_binary.keys():\n",
+        "            model_uri = f\"runs:/{run_id}/models/{name}\"\n",
+        "            registered_model_name = f\"predictive_maintenance_binary_{name.lower()}\"\n",
+        "            mlflow.register_model(model_uri=model_uri, name=registered_model_name)\n",
+        "            print(f\"Registered binary base model: {registered_model_name}\")\n",
+        "\n",
+        "        base_model_predictions_val_binary = create_base_model_predictions(fitted_models_binary, X_val)\n",
+        "\n",
+        "        meta_learner_binary = xgb.XGBClassifier(n_estimators=50, max_depth=3, learning_rate=0.1, objective='binary:logistic', eval_metric='logloss', random_state=42)\n",
+        "        meta_learner_binary = train_meta_learner(meta_learner_binary, base_model_predictions_val_binary, y_val)\n",
+        "\n",
+        "        base_model_predictions_test_binary = create_base_model_predictions(fitted_models_binary, X_test)\n",
+        "        final_predictions_test_binary = meta_learner_binary.predict(base_model_predictions_test_binary)\n",
+        "\n",
+        "        cm_test_stacked_binary, metrics_test_stacked_binary = evaluate_stacked_model(meta_learner_binary, base_model_predictions_test_binary, y_test, final_predictions_test_binary)\n",
+        "        plot_confusion_matrix(cm_test_stacked_binary, ['No Failure', 'Failure'], 'stacked_binary_confusion_matrix.png')\n",
+        "        mlflow.log_artifact(\"stacked_binary_confusion_matrix.png\")\n",
+        "\n",
+        "        mlflow.log_metric(\"accuracy_stacked_binary\", metrics_test_stacked_binary['ACC'])\n",
+        "        mlflow.log_metric(\"auc_stacked_binary\", metrics_test_stacked_binary['AUC'])\n",
+        "        mlflow.log_metric(\"f2_stacked_binary\", metrics_test_stacked_binary['F2'])\n",
+        "\n",
+        "        mlflow.sklearn.log_model(meta_learner_binary, \"models/meta_learner\",\n",
+        "                                 signature=infer_signature(base_model_predictions_test_binary, final_predictions_test_binary))\n",
+        "        meta_model_uri = f\"runs:/{run_id}/models/meta_learner\"\n",
+        "        meta_registered_name = \"predictive_maintenance_binary_meta_learner\"\n",
+        "        mlflow.register_model(model_uri=meta_model_uri, name=meta_registered_name)\n",
+        "        print(f\"Registered binary meta-learner model: {meta_registered_name}\")\n",
+        "\n",
+        "        y_pred_base_test_binary, cm_dict_base_test_binary, metrics_base_test_binary = predict_and_evaluate(list(fitted_models_binary.values()), X_test, y_test, list(fitted_models_binary.keys()))\n",
+        "        comparison_data_binary = {\n",
+        "            'Model': list(fitted_models_binary.keys()) + ['Stacked'],\n",
+        "            'Accuracy': list(metrics_base_test_binary['ACC']) + [metrics_test_stacked_binary['ACC']],\n",
+        "            'AUC': list(metrics_base_test_binary['AUC']) + [metrics_test_stacked_binary['AUC']],\n",
+        "            'F2': list(metrics_base_test_binary['F2']) + [metrics_test_stacked_binary['F2']]\n",
+        "        }\n",
+        "        comparison_df_binary = pd.DataFrame(comparison_data_binary)\n",
+        "        comparison_df_binary.set_index('Model', inplace=True)\n",
+        "        plot_model_metrics(comparison_df_binary, \"binary_models_comparison.png\")\n",
+        "        mlflow.log_artifact(\"binary_models_comparison.png\")\n",
+        "\n",
+        "        #if args.score_path:\n",
+        "            #mlflow.log_artifact(args.score_path)\n",
+        "\n",
+        "def read_data(path):\n",
+        "    df = pd.read_csv(path)\n",
+        "    return df\n",
+        "\n",
+        "def split_data(df):\n",
+        "    X = df.drop(columns=['Machine failure', 'Failure type'])\n",
+        "    y = df[['Machine failure', 'Failure type']]\n",
+        "    X_trainval, X_test, y_trainval, y_test = train_test_split(X, y, test_size=0.1, stratify=y['Failure type'], random_state=0)\n",
+        "    X_train, X_val, y_train, y_val = train_test_split(X_trainval, y_trainval, test_size=0.11, stratify=y_trainval['Failure type'], random_state=0)\n",
+        "    return X_train, y_train, X_val, y_val, X_test, y_test\n",
+        "\n",
+        "def plot_model_metrics(metrics_df, file_name):\n",
+        "    metrics_df.plot(kind='bar', figsize=(10, 6))\n",
+        "    plt.title('Model Evaluation Metrics')\n",
+        "    plt.ylabel('Score')\n",
+        "    plt.xticks(rotation=0)\n",
+        "    plt.legend(title='Metric')\n",
+        "    plt.grid(True, linestyle='--', alpha=0.6)\n",
+        "    plt.tight_layout()\n",
+        "    plt.savefig(file_name)\n",
+        "    plt.close()\n",
+        "\n",
+        "def plot_confusion_matrix(cm, labels, file_name):\n",
+        "    plt.figure(figsize=(6, 5))\n",
+        "    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)\n",
+        "    plt.title(file_name.replace(\".png\", \"\"))\n",
+        "    plt.ylabel('True Label')\n",
+        "    plt.xlabel('Predicted Label')\n",
+        "    plt.tight_layout()\n",
+        "    plt.savefig(file_name)\n",
+        "    plt.close()\n",
+        "\n",
+        "def eval_preds(model, X, y_true):\n",
+        "    y_true_binary = y_true['Machine failure']\n",
+        "    y_pred = model.predict(X)\n",
+        "    cm = confusion_matrix(y_true_binary, y_pred)\n",
+        "    proba = model.predict_proba(X)[:, 1]\n",
+        "    metrics = pd.Series(dtype='float64')\n",
+        "    metrics['ACC'] = accuracy_score(y_true_binary, y_pred)\n",
+        "    metrics['AUC'] = roc_auc_score(y_true_binary, proba)\n",
+        "    metrics['F1'] = f1_score(y_true_binary, y_pred, pos_label=1)\n",
+        "    metrics['F2'] = fbeta_score(y_true_binary, y_pred, pos_label=1, beta=2)\n",
+        "    return cm, round(metrics, 3)\n",
+        "\n",
+        "def fit_base_models(clf_list, clf_names, X_train, X_val, y_train, y_val):\n",
+        "    metrics_df = pd.DataFrame(columns=clf_names)\n",
+        "    fitted_models = {}\n",
+        "    confusion_matrices = {}\n",
+        "    for model, name in zip(clf_list, clf_names):\n",
+        "        model.fit(X_train, y_train['Machine failure'])\n",
+        "        fitted_models[name] = model\n",
+        "        cm, scores = eval_preds(model, X_val, y_val)\n",
+        "        metrics_df[name] = scores\n",
+        "        confusion_matrices[name] = cm\n",
+        "    return metrics_df.T, fitted_models, confusion_matrices\n",
+        "\n",
+        "def tune_and_fit(clf, X, y, params):\n",
+        "    scorer = make_scorer(fbeta_score, pos_label=1, beta=2)\n",
+        "    grid_model = GridSearchCV(clf, param_grid=params, cv=5, scoring=scorer)\n",
+        "    grid_model.fit(X, y['Machine failure'])\n",
+        "    print(f'Best params for {clf.__class__.__name__}: {grid_model.best_params_}')\n",
+        "    return grid_model\n",
+        "\n",
+        "def create_base_model_predictions(fitted_models, X):\n",
+        "    preds = {model_name: model.predict_proba(X)[:, 1] for model_name, model in fitted_models.items()}\n",
+        "    return pd.DataFrame(preds)\n",
+        "\n",
+        "def train_meta_learner(meta_learner, base_predictions, y_true):\n",
+        "    meta_learner.fit(base_predictions, y_true['Machine failure'])\n",
+        "    return meta_learner\n",
+        "\n",
+        "def evaluate_stacked_model(meta_learner, base_predictions, y_true, y_pred):\n",
+        "    cm, metrics = eval_preds(meta_learner, base_predictions, y_true)\n",
+        "    print(\"--- Stacked Model Test Set Evaluation (Binary) ---\")\n",
+        "    print(metrics)\n",
+        "    return cm, metrics\n",
+        "\n",
+        "def predict_and_evaluate(fitted_models, X, y_true, clf_str):\n",
+        "    cm_dict = {}\n",
+        "    metrics_df = pd.DataFrame(columns=clf_str)\n",
+        "    y_pred_df = pd.DataFrame(columns=clf_str)\n",
+        "    for fit_model, model_name in zip(fitted_models, clf_str):\n",
+        "        y_pred = fit_model.predict(X)\n",
+        "        y_pred_df[model_name] = y_pred\n",
+        "        cm, scores = eval_preds(fit_model, X, y_true)\n",
+        "        cm_dict[model_name] = cm\n",
+        "        metrics_df[model_name] = scores\n",
+        "    return y_pred_df, cm_dict, metrics_df.T\n",
+        "\n",
+        "def parse_args():\n",
+        "    parser = argparse.ArgumentParser()\n",
+        "    parser.add_argument(\"--prepared_data\", type=str, help=\"Path to the prepared training dataset\")\n",
+        "    # parser.add_argument(\"--score_path\", type=str, help=\"Path to the scoring script\")\n",
+        "    parser.add_argument(\"--scaler_path\", type=str, help=\"Path to the scaler\")\n",
+        "    return parser.parse_args()\n",
+        "\n",
+        "if __name__ == \"__main__\":\n",
+        "    args = parse_args()\n",
+        "    main(args)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Overwriting src/train-binary-model.py\n"
+        }
+      ],
+      "execution_count": 55,
+      "metadata": {
+        "gather": {
+          "logged": 1747325457042
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Create a command job that trains the binary models and registers the models as MLModel"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azure.ai.ml import Input, Output\n",
+        "from azure.ai.ml.constants import AssetTypes\n",
+        "from azure.ai.ml import command\n",
+        "\n",
+        "train_binary_model = command(\n",
+        "   code=\"./src\",\n",
+        "   command=\"python train-binary-model.py --prepared_data ${{inputs.training_data}} --scaler_path ${{inputs.scaler}}\",\n",
+        "   inputs={\n",
+        "        \"training_data\": Input(type=\"uri_file\", path=\"azureml:training_data_predictive_maintenance:9\"),\n",
+        "        \"scaler\": Input(type=\"uri_file\", path=\"azureml:scaler_predictive_maintenance:6\")\n",
+        "    },\n",
+        "   environment=\"sklearn-env:2\",\n",
+        "   compute=\"jmanuel\",\n",
+        "   display_name=\"Train Binary Model\",\n",
+        "   experiment_name=\"binary-training\",\n",
+        ")\n",
+        "\n",
+        "returned_job = ml_client.create_or_update(train_binary_model)\n",
+        "aml_url = returned_job.studio_url\n",
+        "print(\"Monitor your job at\", aml_url)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "\r\u001b[32mUploading src (0.04 MBs):   0%|          | 0/42881 [00:00<?, ?it/s]\r\u001b[32mUploading src (0.04 MBs): 100%|██████████| 42881/42881 [00:00<00:00, 1561100.50it/s]\n\u001b[39m\n\n"
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Monitor your job at https://ml.azure.com/runs/lucid_dolphin_z94cg0wqph?wsid=/subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourcegroups/case-study-rg/workspaces/ml-intern-ws&tid=6f731b06-089d-46f3-b7a6-b11ab2f47e4c\n"
+        }
+      ],
+      "execution_count": 45,
+      "metadata": {
+        "gather": {
+          "logged": 1747425958771
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Model Training - Multi-Class Classifier"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile {script_folder}/train-multiclass-model.py\n",
+        "\n",
+        "import pandas as pd\n",
+        "from sklearn.model_selection import train_test_split\n",
+        "import xgboost as xgb\n",
+        "import matplotlib.pyplot as plt\n",
+        "import seaborn as sns\n",
+        "from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, fbeta_score, make_scorer\n",
+        "from sklearn.model_selection import GridSearchCV\n",
+        "import time\n",
+        "import argparse\n",
+        "import os\n",
+        "import joblib\n",
+        "import mlflow\n",
+        "import mlflow.sklearn\n",
+        "from mlflow.models.signature import infer_signature\n",
+        "from mlflow.tracking import MlflowClient\n",
+        "\n",
+        "def main(args):\n",
+        "    prepared_data = args.prepared_data\n",
+        "    scaler_path = args.scaler_path\n",
+        "    scaler = joblib.load(scaler_path)\n",
+        "    print(\"Scaler loaded successfully.\")\n",
+        "\n",
+        "    with mlflow.start_run():\n",
+        "        client = MlflowClient()\n",
+        "        run_id = mlflow.active_run().info.run_id\n",
+        "\n",
+        "        mlflow.log_artifact(scaler_path, artifact_path=\"scaler\")\n",
+        "\n",
+        "        df = read_data(prepared_data)\n",
+        "        print(\"Data loaded successfully:\")\n",
+        "        print(df.info())\n",
+        "\n",
+        "        print(\"Splitting data...\")\n",
+        "        X_train, y_train, X_val, y_val, X_test, y_test = split_data(df)\n",
+        "\n",
+        "        print(\"Defining multi-class models...\")\n",
+        "        xgb1_multi = xgb.XGBClassifier(objective='multi:softmax', num_class=len(y_train['Failure type'].unique()), eval_metric='mlogloss', random_state=42)\n",
+        "        xgb2_multi = xgb.XGBClassifier(objective='multi:softmax', num_class=len(y_train['Failure type'].unique()), eval_metric='mlogloss', n_estimators=200, max_depth=5, learning_rate=0.1, random_state=42)\n",
+        "        xgb3_multi = xgb.XGBClassifier(objective='multi:softmax', num_class=len(y_train['Failure type'].unique()), eval_metric='mlogloss', n_estimators=50, max_depth=7, random_state=42)\n",
+        "        clf_multi = [xgb1_multi, xgb2_multi, xgb3_multi]\n",
+        "        clf_str_multi = ['XGB1', 'XGB2', 'XGB3']\n",
+        "\n",
+        "        print(\"Defining hyperparameters...\")\n",
+        "        xgb1_params_multi = {\"n_estimators\": [50, 100], \"max_depth\": [3, 4]}\n",
+        "        xgb2_params_multi = {\"n_estimators\": [150, 175, 200], \"max_depth\": [4, 5], \"learning_rate\": [0.1, 0.3, 0.05]}\n",
+        "        xgb3_params_multi = {\"n_estimators\": [30, 40, 50], \"max_depth\": [6, 7]}\n",
+        "        params_multi = pd.Series(data=[xgb1_params_multi, xgb2_params_multi, xgb3_params_multi], index=clf_multi)\n",
+        "\n",
+        "        failure_labels = ['No Failure', 'PWF', 'OSF', 'HDF', 'TWF']\n",
+        "        metrics_df, fitted_models, confusion_matrices = fit_base_models(clf_multi, clf_str_multi, X_train, X_val, y_train, y_val, failure_labels)\n",
+        "        print(f\"Base Model Metrics: {metrics_df}\")\n",
+        "        plot_model_metrics(metrics_df, \"multiclass_base_model_metrics.png\")\n",
+        "        mlflow.log_artifact(\"multiclass_base_model_metrics.png\")\n",
+        "\n",
+        "        for name, cm in confusion_matrices.items():\n",
+        "            plot_confusion_matrix(cm, failure_labels, f'confusion_matrix_multi_{name}.png')\n",
+        "            mlflow.log_artifact(f'confusion_matrix_multi_{name}.png')\n",
+        "\n",
+        "        failure_label_map = {0: 'NoFailure', 1: 'PWF', 2: 'OSF', 3: 'HDF', 4: 'TWF',}\n",
+        "        print(\"Tuning hyperparameters...\")\n",
+        "        fitted_models_multi = {name: tune_and_fit(model, X_train, y_train, params_multi[model]) for model, name in zip(clf_multi, clf_str_multi)}\n",
+        "        for name, model in fitted_models_multi.items():\n",
+        "            input_example = pd.DataFrame(X_test)\n",
+        "            signature = infer_signature(input_example, model.predict(X_test))\n",
+        "            mlflow.sklearn.log_model(model, artifact_path=f\"models/{name}\", signature=signature)\n",
+        "\n",
+        "        for name in fitted_models_multi.keys():\n",
+        "            model_uri = f\"runs:/{run_id}/models/{name}\"\n",
+        "            registered_model_name = f\"predictive_maintenance_multi_{name.lower()}\"\n",
+        "            mlflow.register_model(model_uri=model_uri, name=registered_model_name)\n",
+        "            print(f\"Registered multiclass model: {registered_model_name}\")\n",
+        "\n",
+        "        print(\"Creating predictions...\")\n",
+        "        base_model_predictions_val_multi = create_base_model_predictions(fitted_models_multi, X_val, failure_label_map)\n",
+        "\n",
+        "        print(\"Training meta learner...\")\n",
+        "        meta_learner_multi = xgb.XGBClassifier(n_estimators=50, max_depth=3, learning_rate=0.1, objective='multi:softmax', eval_metric='mlogloss', random_state=42, num_class=len(y_train['Failure type'].unique()))\n",
+        "        meta_learner_multi = train_meta_learner(meta_learner_multi, base_model_predictions_val_multi, y_val,)\n",
+        "        base_model_predictions_test_multi = create_base_model_predictions(fitted_models_multi, X_test, failure_label_map)\n",
+        "\n",
+        "        final_predictions_test_multi = meta_learner_multi.predict(base_model_predictions_test_multi)\n",
+        "        cm_test_stacked_multi, metrics_test_stacked_multi = evaluate_stacked_model(meta_learner_multi, base_model_predictions_test_multi, y_test, final_predictions_test_multi, failure_labels)\n",
+        "        plot_confusion_matrix(cm_test_stacked_multi, failure_labels, f'stacked_multi_confusion_matrix.png')\n",
+        "        mlflow.log_artifact(\"stacked_multi_confusion_matrix.png\")\n",
+        "\n",
+        "        mlflow.log_metric(\"accuracy_stacked_multi\", metrics_test_stacked_multi['ACC'])\n",
+        "        mlflow.log_metric(\"f2_stacked_multi\", metrics_test_stacked_multi['F2'])\n",
+        "\n",
+        "        mlflow.sklearn.log_model(meta_learner_multi, \"models/meta_learner\",\n",
+        "                                 signature=infer_signature(base_model_predictions_test_multi, final_predictions_test_multi))\n",
+        "        meta_model_uri = f\"runs:/{run_id}/models/meta_learner\"\n",
+        "        meta_registered_name = \"predictive_maintenance_multiclass_meta_learner\"\n",
+        "        mlflow.register_model(model_uri=meta_model_uri, name=meta_registered_name)\n",
+        "        print(f\"Registered multiclass meta-learner model: {meta_registered_name}\")\n",
+        "\n",
+        "        y_pred_base_test_multi, cm_dict_base_test_multi, metrics_base_test_multi = predict_and_evaluate(list(fitted_models_multi.values()), X_test, y_test, list(fitted_models_multi.keys()), failure_labels)\n",
+        "        comparison_data_multi = {\n",
+        "            'Model': list(fitted_models_multi.keys()) + ['Stacked'],\n",
+        "            'Accuracy': list(metrics_base_test_multi['ACC']) + [metrics_test_stacked_multi['ACC']],\n",
+        "            'F2': list(metrics_base_test_multi['F2']) + [metrics_test_stacked_multi['F2']]\n",
+        "        }\n",
+        "        comparison_df_multi = pd.DataFrame(comparison_data_multi)\n",
+        "        print(comparison_df_multi)\n",
+        "        comparison_df_multi.set_index('Model', inplace=True)\n",
+        "        plot_model_metrics(comparison_df_multi, \"multiclass_models_comparison.png\")\n",
+        "        mlflow.log_artifact(\"multiclass_models_comparison.png\")\n",
+        "\n",
+        "        #if args.score_path:\n",
+        "            #mlflow.log_artifact(args.score_path)\n",
+        "\n",
+        "def read_data(path):\n",
+        "    df = pd.read_csv(path)\n",
+        "    return df\n",
+        "\n",
+        "def split_data(df):\n",
+        "    X = df.drop(columns=['Machine failure', 'Failure type'])\n",
+        "    y = df[['Machine failure', 'Failure type']]\n",
+        "    X_trainval, X_test, y_trainval, y_test = train_test_split(X, y, test_size=0.1, stratify=y['Failure type'], random_state=0)\n",
+        "    X_train, X_val, y_train, y_val = train_test_split(X_trainval, y_trainval, test_size=0.11, stratify=y_trainval['Failure type'], random_state=0)\n",
+        "    return X_train, y_train, X_val, y_val, X_test, y_test\n",
+        "\n",
+        "def plot_model_metrics(metrics_df, file_name):\n",
+        "    metrics_df.plot(kind='bar', figsize=(10, 6))\n",
+        "    plt.title('Model Evaluation Metrics')\n",
+        "    plt.ylabel('Score')\n",
+        "    plt.xticks(rotation=0)\n",
+        "    plt.legend(title='Metric')\n",
+        "    plt.grid(True, linestyle='--', alpha=0.6)\n",
+        "    plt.tight_layout()\n",
+        "    plt.savefig(file_name)\n",
+        "    plt.close()\n",
+        "\n",
+        "def plot_confusion_matrix(cm, labels, file_name):\n",
+        "    plt.figure(figsize=(6, 5))\n",
+        "    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)\n",
+        "    plt.title(file_name.replace(\".png\", \"\"))\n",
+        "    plt.ylabel('True Label')\n",
+        "    plt.xlabel('Predicted Label')\n",
+        "    plt.tight_layout()\n",
+        "    plt.savefig(file_name)\n",
+        "    plt.close()\n",
+        "\n",
+        "def eval_preds(model, X, y_true, failure_labels):\n",
+        "    y_true_multi = y_true['Failure type']\n",
+        "    y_pred = model.predict(X)\n",
+        "    cm = confusion_matrix(y_true_multi, y_pred, labels=range(len(failure_labels)))\n",
+        "    metrics = pd.Series(dtype='float64')\n",
+        "    metrics['ACC'] = accuracy_score(y_true_multi, y_pred)\n",
+        "    metrics['F1'] = f1_score(y_true_multi, y_pred, average='weighted')\n",
+        "    metrics['F2'] = fbeta_score(y_true_multi, y_pred, beta=2, average='weighted')\n",
+        "\n",
+        "    return cm, round(metrics, 3)\n",
+        "\n",
+        "def fit_base_models(clf_list, clf_names, X_train, X_val, y_train, y_val, failure_labels):\n",
+        "    metrics_df = pd.DataFrame(columns=clf_names)\n",
+        "    fitted_models = {}\n",
+        "    confusion_matrices = {}\n",
+        "    for model, name in zip(clf_list, clf_names):\n",
+        "        model.fit(X_train, y_train['Failure type'])\n",
+        "        fitted_models[name] = model\n",
+        "        cm, scores = eval_preds(model, X_val, y_val, failure_labels)\n",
+        "        metrics_df[name] = scores\n",
+        "        confusion_matrices[name] = cm\n",
+        "    return metrics_df.T, fitted_models, confusion_matrices\n",
+        "\n",
+        "def tune_and_fit(clf, X, y, params):\n",
+        "    scorer =  make_scorer(fbeta_score, beta=2, average='weighted')\n",
+        "    start_time = time.time()\n",
+        "    grid_model = GridSearchCV(clf, param_grid=params, cv=5, scoring=scorer)\n",
+        "    grid_model.fit(X, y['Failure type'])\n",
+        "    print(f'Best params for {clf.__class__.__name__}: {grid_model.best_params_}')\n",
+        "    train_time = time.time() - start_time\n",
+        "    mins = int(train_time // 60)\n",
+        "    print(f'Training time: {mins}m {round(train_time - mins * 60)}s')\n",
+        "    return grid_model\n",
+        "\n",
+        "def create_base_model_predictions(fitted_models, X, failure_label_map):\n",
+        "    predictions = pd.DataFrame()\n",
+        "    for model_name, model in fitted_models.items():\n",
+        "        preds = model.predict_proba(X)\n",
+        "        for i in range(preds.shape[1]):\n",
+        "            class_name = failure_label_map.get(i, f'class_{i}')\n",
+        "            predictions[f'{model_name}_class_{i}'] = preds[:, i]\n",
+        "    return predictions\n",
+        "\n",
+        "def train_meta_learner(meta_learner, base_predictions, y_true):\n",
+        "    meta_learner.fit(base_predictions, y_true['Failure type'])\n",
+        "    return meta_learner\n",
+        "\n",
+        "def evaluate_stacked_model(meta_learner, base_predictions, y_true, y_pred, failure_labels):\n",
+        "    cm, metrics = eval_preds(meta_learner, base_predictions, y_true, failure_labels)\n",
+        "    print(\"--- Stacked Model Test Set Evaluation (Multi-class) ---\")\n",
+        "    print(metrics)\n",
+        "    return cm, metrics\n",
+        "\n",
+        "def predict_and_evaluate(fitted_models, X, y_true, clf_str, failure_labels):\n",
+        "    cm_dict = {}\n",
+        "    metrics_df = pd.DataFrame(columns=clf_str)\n",
+        "    y_pred_df = pd.DataFrame(columns=clf_str)\n",
+        "    for fit_model, model_name in zip(fitted_models, clf_str):\n",
+        "        y_pred = fit_model.predict(X)\n",
+        "        y_pred_df[model_name] = y_pred\n",
+        "        cm, scores = eval_preds(fit_model, X, y_true, failure_labels)\n",
+        "        cm_dict[model_name] = cm\n",
+        "        metrics_df[model_name] = scores\n",
+        "    return y_pred_df, cm_dict, metrics_df.T\n",
+        "\n",
+        "def parse_args():\n",
+        "    parser = argparse.ArgumentParser()\n",
+        "    parser.add_argument(\"--prepared_data\", type=str, help=\"Path to the prepared training dataset\")\n",
+        "    # parser.add_argument(\"--score_path\", type=str, help=\"Path to the scoring script\")\n",
+        "    parser.add_argument(\"--scaler_path\", type=str, help=\"Path to the scaler\")\n",
+        "    return parser.parse_args()\n",
+        "\n",
+        "if __name__ == \"__main__\":\n",
+        "    args = parse_args()\n",
+        "    main(args)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Overwriting src/train-multiclass-model.py\n"
+        }
+      ],
+      "execution_count": 4,
+      "metadata": {}
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Create a command job that trains the binary models and registers the models as MLModel"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azure.ai.ml import Input, Output\n",
+        "from azure.ai.ml.constants import AssetTypes\n",
+        "from azure.ai.ml import command\n",
+        "\n",
+        "train_multi_model = command(\n",
+        "   code=\"./src\",\n",
+        "   command=\"python train-multiclass-model.py --prepared_data ${{inputs.training_data}} --scaler_path ${{inputs.scaler}}\",\n",
+        "   inputs={\n",
+        "        \"training_data\": Input(type=\"uri_file\", path=\"azureml:training_data_predictive_maintenance:9\"),\n",
+        "        \"scaler\": Input(type=\"uri_file\", path=\"azureml:scaler_predictive_maintenance:6\")\n",
+        "    },\n",
+        "   environment=\"sklearn-env:2\",\n",
+        "   compute=\"jmanuel\",\n",
+        "   display_name=\"Train Multi-Class Model\",\n",
+        "   experiment_name=\"multi-class-training\",\n",
+        ")\n",
+        "\n",
+        "returned_job = ml_client.create_or_update(train_multi_model)\n",
+        "aml_url = returned_job.studio_url\n",
+        "print(\"Monitor your job at\", aml_url)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "Class AutoDeleteSettingSchema: This is an experimental class, and may change at any time. Please see https://aka.ms/azuremlexperimental for more information.\nClass AutoDeleteConditionSchema: This is an experimental class, and may change at any time. Please see https://aka.ms/azuremlexperimental for more information.\nClass BaseAutoDeleteSettingSchema: This is an experimental class, and may change at any time. Please see https://aka.ms/azuremlexperimental for more information.\nClass IntellectualPropertySchema: This is an experimental class, and may change at any time. Please see https://aka.ms/azuremlexperimental for more information.\nClass ProtectionLevelSchema: This is an experimental class, and may change at any time. Please see https://aka.ms/azuremlexperimental for more information.\nClass BaseIntellectualPropertySchema: This is an experimental class, and may change at any time. Please see https://aka.ms/azuremlexperimental for more information.\n\u001b[32mUploading src (0.04 MBs): 100%|██████████| 39681/39681 [00:00<00:00, 1571616.40it/s]\n\u001b[39m\n\n"
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Monitor your job at https://ml.azure.com/runs/mighty_papaya_dg3z9w8562?wsid=/subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourcegroups/case-study-rg/workspaces/ml-intern-ws&tid=6f731b06-089d-46f3-b7a6-b11ab2f47e4c\n"
+        }
+      ],
+      "execution_count": 5,
+      "metadata": {
+        "gather": {
+          "logged": 1747670707921
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Create scripts for prediction flow of the models"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Binary classifier"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile {script_folder}/stacked-model-binary.py\n",
+        "import mlflow.pyfunc\n",
+        "import pandas as pd\n",
+        "import numpy as np\n",
+        "import joblib\n",
+        "import json\n",
+        "\n",
+        "class StackedBinaryModel(mlflow.pyfunc.PythonModel):\n",
+        "    def load_context(self, context):\n",
+        "        import os\n",
+        "\n",
+        "        self.scaler = joblib.load(context.artifacts[\"scaler\"])\n",
+        "        self.model_1 = mlflow.sklearn.load_model(context.artifacts[\"xgb1\"])\n",
+        "        self.model_2 = mlflow.sklearn.load_model(context.artifacts[\"xgb2\"])\n",
+        "        self.model_3 = mlflow.sklearn.load_model(context.artifacts[\"xgb3\"])\n",
+        "        self.meta_learner = mlflow.sklearn.load_model(context.artifacts[\"meta\"])\n",
+        "\n",
+        "        self.feature_cols = [\n",
+        "            \"Air temperature\", \"Process temperature\", \"Rotational speed\", \"Torque\", \"Tool wear\"\n",
+        "        ]\n",
+        "        self.cat_map = {0: 0, 1: 1, 2: 2}  # Example mapping for \"Machine type\"\n",
+        "\n",
+        "    def preprocess(self, data):\n",
+        "        df = pd.DataFrame([data])\n",
+        "        df[\"Machine type\"] = df[\"Machine type\"].map(self.cat_map)\n",
+        "        X_num = df[self.feature_cols].astype(float)\n",
+        "        X_scaled = self.scaler.transform(X_num)\n",
+        "        return X_scaled\n",
+        "\n",
+        "    def predict(self, context, model_input):\n",
+        "        try:\n",
+        "            inputs = model_input if isinstance(model_input, list) else [model_input]\n",
+        "            preds = []\n",
+        "\n",
+        "            for row in inputs:\n",
+        "                X_scaled = self.preprocess(row)\n",
+        "                prob1 = self.model_1.predict_proba(X_scaled)[0][1]\n",
+        "                prob2 = self.model_2.predict_proba(X_scaled)[0][1]\n",
+        "                prob3 = self.model_3.predict_proba(X_scaled)[0][1]\n",
+        "\n",
+        "                stacked_input = np.array([[prob1, prob2, prob3]])\n",
+        "                final_pred = self.meta_learner.predict(stacked_input)[0]\n",
+        "                preds.append(int(final_pred))\n",
+        "\n",
+        "            return preds\n",
+        "        except Exception as e:\n",
+        "            return {\"error\": str(e)}"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Writing src/stacked-model-binary.py\n"
+        }
+      ],
+      "execution_count": 2,
+      "metadata": {}
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Multiclass classifier"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile {script_folder}/stacked-model-multi.py\n",
+        "import mlflow.pyfunc\n",
+        "import pandas as pd\n",
+        "import numpy as np\n",
+        "import joblib\n",
+        "import json\n",
+        "\n",
+        "class StackedMultiClassModel(mlflow.pyfunc.PythonModel):\n",
+        "    def load_context(self, context):\n",
+        "        import os\n",
+        "\n",
+        "        self.scaler = joblib.load(context.artifacts[\"scaler\"])\n",
+        "        self.model_1 = mlflow.sklearn.load_model(context.artifacts[\"xgb1\"])\n",
+        "        self.model_2 = mlflow.sklearn.load_model(context.artifacts[\"xgb2\"])\n",
+        "        self.model_3 = mlflow.sklearn.load_model(context.artifacts[\"xgb3\"])\n",
+        "        self.meta_learner = mlflow.sklearn.load_model(context.artifacts[\"meta\"])\n",
+        "\n",
+        "        self.feature_cols = [\n",
+        "            \"Air temperature\", \"Process temperature\", \"Rotational speed\", \"Torque\", \"Tool wear\"\n",
+        "        ]\n",
+        "        self.cat_map = {0: 0, 1: 1, 2: 2}\n",
+        "\n",
+        "    def preprocess(self, data):\n",
+        "        df = pd.DataFrame([data])\n",
+        "        df[\"Machine type\"] = df[\"Machine type\"].map(self.cat_map)\n",
+        "        X_num = df[self.feature_cols].astype(float)\n",
+        "        X_scaled = self.scaler.transform(X_num)\n",
+        "        return X_scaled\n",
+        "\n",
+        "    def predict(self, context, model_input):\n",
+        "        try:\n",
+        "            inputs = model_input if isinstance(model_input, list) else [model_input]\n",
+        "            preds = []\n",
+        "\n",
+        "            for row in inputs:\n",
+        "                X_scaled = self.preprocess(row)\n",
+        "                prob1 = self.model_1.predict_proba(X_scaled)[0]\n",
+        "                prob2 = self.model_2.predict_proba(X_scaled)[0]\n",
+        "                prob3 = self.model_3.predict_proba(X_scaled)[0]\n",
+        "\n",
+        "                stacked_input = np.array([np.hstack([prob1, prob2, prob3])])\n",
+        "                final_pred = self.meta_learner.predict(stacked_input)[0]\n",
+        "                preds.append(int(final_pred))\n",
+        "\n",
+        "            return preds\n",
+        "        except Exception as e:\n",
+        "            return {\"error\": str(e)}"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Writing src/stacked-model-multi.py\n"
+        }
+      ],
+      "execution_count": 3,
+      "metadata": {}
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Wrap models into MLflow model"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import mlflow\n",
+        "import mlflow.pyfunc\n",
+        "\n",
+        "# Define the model artifacts (scaler and base models)\n",
+        "artifacts_binary = {\n",
+        "    \"scaler\": \"azureml://subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourcegroups/case-study-rg/workspaces/ml-intern-ws/datastores/workspaceblobstore/paths/azureml/plum_pin_z447wntv8y/scaler_output\",\n",
+        "    \"xgb1\": \"models:/predictive_maintenance_binary_xgb1/1\",\n",
+        "    \"xgb2\": \"models:/predictive_maintenance_binary_xgb2/1\",\n",
+        "    \"xgb3\": \"models:/predictive_maintenance_binary_xgb3/1\",\n",
+        "    \"meta\": \"models:/predictive_maintenance_binary_meta_learner/1\"\n",
+        "}\n",
+        "\n",
+        "# Log the stacked binary model\n",
+        "mlflow.pyfunc.log_model(\n",
+        "    artifact_path=\"stacked_binary_model\",\n",
+        "    python_model=StackedBinaryModel(),  # This is your custom class from stacked_model_binary.py\n",
+        "    artifacts=artifacts_binary,\n",
+        "    registered_model_name=\"stacked_binary_model\"  # You can give your model a versioned name\n",
+        ")\n",
+        "\n",
+        "artifacts_multi = {\n",
+        "    \"scaler\": \"azureml://subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourcegroups/case-study-rg/workspaces/ml-intern-ws/datastores/workspaceblobstore/paths/azureml/plum_pin_z447wntv8y/scaler_output\",\n",
+        "    \"xgb1\": \"models:/predictive_maintenance_multi_xgb1/5\",\n",
+        "    \"xgb2\": \"models:/predictive_maintenance_multi_xgb2/5\",\n",
+        "    \"xgb3\": \"models:/predictive_maintenance_multi_xgb3/5\",\n",
+        "    \"meta\": \"models:/predictive_maintenance_multiclass_meta_learner/4\"\n",
+        "}\n",
+        "\n",
+        "# Log the stacked multi-class model\n",
+        "mlflow.pyfunc.log_model(\n",
+        "    artifact_path=\"stacked_multiclass_model\",\n",
+        "    python_model=StackedMultiClassModel(),  # This is your custom class from stacked_model_multi.py\n",
+        "    artifacts=artifacts_multi,\n",
+        "    registered_model_name=\"stacked_multiclass_model\"  # You can give your model a versioned name\n",
+        ")"
+      ],
+      "outputs": [
+        {
+          "output_type": "error",
+          "ename": "NameError",
+          "evalue": "name 'StackedBinaryModel' is not defined",
+          "traceback": [
+            "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+            "\u001b[0;31mNameError\u001b[0m                                 Traceback (most recent call last)",
+            "Cell \u001b[0;32mIn[14], line 16\u001b[0m\n\u001b[1;32m      5\u001b[0m artifacts_binary \u001b[38;5;241m=\u001b[39m {\n\u001b[1;32m      6\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mscaler\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mazureml://subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourcegroups/case-study-rg/workspaces/ml-intern-ws/datastores/workspaceblobstore/paths/azureml/plum_pin_z447wntv8y/scaler_output\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[1;32m      7\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mxgb1\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmodels:/predictive_maintenance_binary_xgb1/1\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[0;32m   (...)\u001b[0m\n\u001b[1;32m     10\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmeta\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmodels:/predictive_maintenance_binary_meta_learner/1\u001b[39m\u001b[38;5;124m\"\u001b[39m\n\u001b[1;32m     11\u001b[0m }\n\u001b[1;32m     13\u001b[0m \u001b[38;5;66;03m# Log the stacked binary model\u001b[39;00m\n\u001b[1;32m     14\u001b[0m mlflow\u001b[38;5;241m.\u001b[39mpyfunc\u001b[38;5;241m.\u001b[39mlog_model(\n\u001b[1;32m     15\u001b[0m     artifact_path\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mstacked_binary_model\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[0;32m---> 16\u001b[0m     python_model\u001b[38;5;241m=\u001b[39m\u001b[43mStackedBinaryModel\u001b[49m(),  \u001b[38;5;66;03m# This is your custom class from stacked_model_binary.py\u001b[39;00m\n\u001b[1;32m     17\u001b[0m     artifacts\u001b[38;5;241m=\u001b[39martifacts_binary,\n\u001b[1;32m     18\u001b[0m     registered_model_name\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mstacked_binary_model\u001b[39m\u001b[38;5;124m\"\u001b[39m  \u001b[38;5;66;03m# You can give your model a versioned name\u001b[39;00m\n\u001b[1;32m     19\u001b[0m )\n\u001b[1;32m     21\u001b[0m artifacts_multi \u001b[38;5;241m=\u001b[39m {\n\u001b[1;32m     22\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mscaler\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mazureml://subscriptions/55fc198d-597c-451e-9372-e172883e1ef0/resourcegroups/case-study-rg/workspaces/ml-intern-ws/datastores/workspaceblobstore/paths/azureml/plum_pin_z447wntv8y/scaler_output\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[1;32m     23\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mxgb1\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmodels:/predictive_maintenance_multi_xgb1/5\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[0;32m   (...)\u001b[0m\n\u001b[1;32m     26\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmeta\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmodels:/predictive_maintenance_multiclass_meta_learner/4\u001b[39m\u001b[38;5;124m\"\u001b[39m\n\u001b[1;32m     27\u001b[0m }\n\u001b[1;32m     29\u001b[0m \u001b[38;5;66;03m# Log the stacked multi-class model\u001b[39;00m\n",
+            "\u001b[0;31mNameError\u001b[0m: name 'StackedBinaryModel' is not defined"
+          ]
+        }
+      ],
+      "execution_count": 14,
+      "metadata": {
+        "gather": {
+          "logged": 1747676715046
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Binary Classifier"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import mlflow.pyfunc\n",
+        "\n",
+        "artifacts = {\n",
+        "    \"scaler\": \"azureml:scaler_predictive_maintenance:6\",\n",
+        "    \"xgb1\": \"models:/predictive_maintenance_binary_xgb1/1\",\n",
+        "    \"xgb2\": \"models:/predictive_maintenance_binary_xgb2/1\",\n",
+        "    \"xgb3\": \"models:/predictive_maintenance_binary_xgb3/1\",\n",
+        "    \"meta\": \"models:/predictive_maintenance_binary_meta_learner/1\"\n",
+        "}\n",
+        "\n",
+        "mlflow.pyfunc.log_model(\n",
+        "    artifact_path=\"stacked_binary_model\",\n",
+        "    python_model=StackedBinaryModel(),\n",
+        "    artifacts=artifacts,\n",
+        "    registered_model_name=\"stacked_binary_model\"\n",
+        ")\n"
+      ],
+      "outputs": [
+        {
+          "output_type": "error",
+          "ename": "NameError",
+          "evalue": "name 'StackedBinaryModel' is not defined",
+          "traceback": [
+            "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+            "\u001b[0;31mNameError\u001b[0m                                 Traceback (most recent call last)",
+            "Cell \u001b[0;32mIn[12], line 13\u001b[0m\n\u001b[1;32m      1\u001b[0m \u001b[38;5;28;01mimport\u001b[39;00m\u001b[38;5;250m \u001b[39m\u001b[38;5;21;01mmlflow\u001b[39;00m\u001b[38;5;21;01m.\u001b[39;00m\u001b[38;5;21;01mpyfunc\u001b[39;00m\n\u001b[1;32m      3\u001b[0m artifacts \u001b[38;5;241m=\u001b[39m {\n\u001b[1;32m      4\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mscaler\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mazureml:scaler_predictive_maintenance:6\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[1;32m      5\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mxgb1\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmodels:/predictive_maintenance_binary_xgb1/1\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[0;32m   (...)\u001b[0m\n\u001b[1;32m      8\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmeta\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmodels:/predictive_maintenance_binary_meta_learner/1\u001b[39m\u001b[38;5;124m\"\u001b[39m\n\u001b[1;32m      9\u001b[0m }\n\u001b[1;32m     11\u001b[0m mlflow\u001b[38;5;241m.\u001b[39mpyfunc\u001b[38;5;241m.\u001b[39mlog_model(\n\u001b[1;32m     12\u001b[0m     artifact_path\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mstacked_binary_model\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[0;32m---> 13\u001b[0m     python_model\u001b[38;5;241m=\u001b[39m\u001b[43mStackedBinaryModel\u001b[49m(),\n\u001b[1;32m     14\u001b[0m     artifacts\u001b[38;5;241m=\u001b[39martifacts,\n\u001b[1;32m     15\u001b[0m     registered_model_name\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mstacked_binary_model\u001b[39m\u001b[38;5;124m\"\u001b[39m\n\u001b[1;32m     16\u001b[0m )\n",
+            "\u001b[0;31mNameError\u001b[0m: name 'StackedBinaryModel' is not defined"
+          ]
+        }
+      ],
+      "execution_count": 12,
+      "metadata": {
+        "gather": {
+          "logged": 1747676406452
+        }
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Multiclass Classifier"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import mlflow.pyfunc\n",
+        "\n",
+        "artifacts = {\n",
+        "    \"scaler\": \"azureml:scaler_predictive_maintenance:6\",\n",
+        "    \"xgb1\": \"models:/predictive_maintenance_binary_xgb1/1\",\n",
+        "    \"xgb2\": \"models:/predictive_maintenance_binary_xgb2/1\",\n",
+        "    \"xgb3\": \"models:/predictive_maintenance_binary_xgb3/1\",\n",
+        "    \"meta\": \"models:/predictive_maintenance_binary_meta_learner/1\"\n",
+        "}\n",
+        "\n",
+        "mlflow.pyfunc.log_model(\n",
+        "    artifact_path=\"stacked_multiclass_model\",\n",
+        "    python_model=StackedMultiClassModel(),\n",
+        "    artifacts=artifacts,\n",
+        "    registered_model_name=\"stacked_multiclass_model\"\n",
+        ")\n"
+      ],
+      "outputs": [
+        {
+          "output_type": "error",
+          "ename": "NameError",
+          "evalue": "name 'StackedMultiClassModel' is not defined",
+          "traceback": [
+            "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+            "\u001b[0;31mNameError\u001b[0m                                 Traceback (most recent call last)",
+            "Cell \u001b[0;32mIn[11], line 13\u001b[0m\n\u001b[1;32m      1\u001b[0m \u001b[38;5;28;01mimport\u001b[39;00m\u001b[38;5;250m \u001b[39m\u001b[38;5;21;01mmlflow\u001b[39;00m\u001b[38;5;21;01m.\u001b[39;00m\u001b[38;5;21;01mpyfunc\u001b[39;00m\n\u001b[1;32m      3\u001b[0m artifacts \u001b[38;5;241m=\u001b[39m {\n\u001b[1;32m      4\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mscaler\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mazureml:scaler_predictive_maintenance:6\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[1;32m      5\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mxgb1\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmodels:/predictive_maintenance_binary_xgb1/1\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[0;32m   (...)\u001b[0m\n\u001b[1;32m      8\u001b[0m     \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmeta\u001b[39m\u001b[38;5;124m\"\u001b[39m: \u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mmodels:/predictive_maintenance_binary_meta_learner/1\u001b[39m\u001b[38;5;124m\"\u001b[39m\n\u001b[1;32m      9\u001b[0m }\n\u001b[1;32m     11\u001b[0m mlflow\u001b[38;5;241m.\u001b[39mpyfunc\u001b[38;5;241m.\u001b[39mlog_model(\n\u001b[1;32m     12\u001b[0m     artifact_path\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mstacked_multiclass_model\u001b[39m\u001b[38;5;124m\"\u001b[39m,\n\u001b[0;32m---> 13\u001b[0m     python_model\u001b[38;5;241m=\u001b[39m\u001b[43mStackedMultiClassModel\u001b[49m(),\n\u001b[1;32m     14\u001b[0m     artifacts\u001b[38;5;241m=\u001b[39martifacts,\n\u001b[1;32m     15\u001b[0m     registered_model_name\u001b[38;5;241m=\u001b[39m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124mstacked_multiclass_model\u001b[39m\u001b[38;5;124m\"\u001b[39m\n\u001b[1;32m     16\u001b[0m )\n",
+            "\u001b[0;31mNameError\u001b[0m: name 'StackedMultiClassModel' is not defined"
+          ]
+        }
+      ],
+      "execution_count": 11,
+      "metadata": {
+        "gather": {
+          "logged": 1747676251162
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineDeployment.schema.json\n",
+        "name: stacked-predictive-deployment\n",
+        "endpoint_name: stacked-predictive-endpoint\n",
+        "model: azureml:stacked_binary_model:1  # or stacked_multi_model\n",
+        "instance_type: Standard_DS3_v2\n",
+        "instance_count: 1\n",
+        "environment: azureml:your-env-name@latest\n",
+        "code_configuration:\n",
+        "  code: ./code\n",
+        "  scoring_script: score.py"
+      ],
+      "outputs": [],
+      "execution_count": null,
+      "metadata": {}
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Create scoring script for endpoint"
+      ],
+      "metadata": {
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# score.py\n",
+        "import json\n",
+        "import mlflow.pyfunc\n",
+        "import os\n",
+        "\n",
+        "model = None\n",
+        "\n",
+        "def init():\n",
+        "    global model\n",
+        "    model_path = os.getenv(\"AZUREML_MODEL_DIR\")\n",
+        "    model = mlflow.pyfunc.load_model(model_path)\n",
+        "\n",
+        "def run(raw_data):\n",
+        "    try:\n",
+        "        data = json.loads(raw_data)\n",
+        "        prediction = model.predict(data)\n",
+        "        return {\"prediction\": prediction}\n",
+        "    except Exception as e:\n",
+        "        return {\"error\": str(e)}\n"
+      ],
+      "outputs": [],
+      "execution_count": null,
+      "metadata": {}
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "python310-sdkv2",
+      "language": "python",
+      "display_name": "Python 3.10 - SDK v2"
+    },
+    "language_info": {
+      "name": "python",
+      "version": "3.10.16",
+      "mimetype": "text/x-python",
+      "codemirror_mode": {
+        "name": "ipython",
+        "version": 3
+      },
+      "pygments_lexer": "ipython3",
+      "nbconvert_exporter": "python",
+      "file_extension": ".py"
+    },
+    "microsoft": {
+      "ms_spell_check": {
+        "ms_spell_check_language": "en"
+      },
+      "host": {
+        "AzureML": {
+          "notebookHasBeenCompleted": true
+        }
+      }
+    },
+    "nteract": {
+      "version": "nteract-front-end@1.0.0"
+    },
+    "kernel_info": {
+      "name": "python310-sdkv2"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 2
+}
