@@ -1,1 +1,1 @@
-# Predictive-Maintenance-XGBoost
+# Stacked Predictive Maintenance Model
